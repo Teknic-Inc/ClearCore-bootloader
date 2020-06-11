@@ -1,0 +1,51 @@
+<!DOCTYPE CrossStudio_Project_File>
+<solution Name="uf2-booter" target="8" version="2">
+  <project Name="uf2-booter">
+    <configuration
+      Name="Common"
+      arm_architecture="v7EM"
+      arm_core_type="Cortex-M4"
+      arm_endian="Little"
+      arm_fp_abi="Hard"
+      arm_fpu_type="FPv4-SP-D16"
+      arm_simulator_memory_simulation_parameter="RX 00000000,00080000,FFFFFFFF;RWX 20000000,00030000,CDCDCDCD"
+      arm_target_device_name="ATSAME53N19"
+      arm_target_interface_type="SWD"
+      debug_start_from_entry_point_symbol="No"
+      debug_target_connection="J-Link"
+      linker_section_placements_segments="FLASH RX 0x00000000 0x00080000;RAM RWX 0x20000000 0x00030000"
+      project_directory=""
+      project_type="Externally Built Executable" />
+    <folder Name="src" exclude="" filter="*.c;*.h" path="src" recurse="Yes" />
+    <folder Name="inc" exclude="" filter="*.h" path="inc" recurse="Yes" />
+    <folder
+      Name="boards"
+      exclude=""
+      filter="*.mk;*.h"
+      path="boards"
+      recurse="Yes" />
+    <folder Name="lib" exclude="" filter="*.h;*.c" path="lib" recurse="Yes" />
+    <configuration
+      Name="Debug"
+      build_always_rebuild="Yes"
+      c_preprocessor_definitions="SAME53=1;CLEARCORE_ID=1;USE_HID=1;USE_LOGS=1"
+      debug_additional_load_file=""
+      debug_additional_load_file_address=""
+      debug_additional_load_file_type="Detect"
+      debug_load_sections="No"
+      debug_register_definition_file="$(PackagesDir)/SAME53/XML/ATSAME53N19A_Registers.xml"
+      external_build_command="make BOARD=ClearCore"
+      external_build_file_name=""
+      external_clean_command="make clean"
+      external_debug_symbols_file_name=""
+      external_load_address="0x4000"
+      external_load_file_type="Detect"
+      pre_build_command_control="Always Run" />
+    <file file_name="Makefile" />
+  </project>
+  <configuration
+    Name="Debug"
+    c_preprocessor_definitions="DEBUG"
+    gcc_debugging_level="Level 3"
+    gcc_optimization_level="None" />
+</solution>
