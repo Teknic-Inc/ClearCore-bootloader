@@ -58,8 +58,8 @@ while (GCLK->SYNCBUSY.reg & GCLK_SYNCBUSY_GENCTRL((GCLK_INDEX))) {             \
 #define __CLEARCORE_DPLL0_HZ    (96000000)             // 96 MHz
 
 void system_init(void) {
-    /* Set 1 Flash Wait State for 48MHz */
-    NVMCTRL->CTRLA.reg |= NVMCTRL_CTRLA_RWS(0);
+    // Automatic wait states.
+    NVMCTRL->CTRLA.bit.AUTOWS = 1;
 
     /* Software reset the module to ensure it is re-initialized correctly */
     /* Note: Due to synchronization, there is a delay from writing CTRL.SWRST until the reset is complete.

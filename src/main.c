@@ -78,6 +78,8 @@
 
 static void check_start_application(void);
 
+static void check_and_restore_fuses(void);
+
 bool main_b_cdc_enable = false;
 extern int8_t led_tick_step;
 
@@ -181,7 +183,46 @@ int main(void) {
     // Delay a bit so SWD programmer can have time to attach.
     delay(15);
 #endif
+
+    // Enable 2.7V brownout detection. The default fuse value is 1.7
+    // Set brownout detection to ~2.7V. Default from factory is 1.7V,
+    // which is too low for proper operation of external SPI flash chips (they are 2.7-3.6V).
+    // Also without this higher level, the SAMD51 will write zeros to flash intermittently.
+    // Disable while changing level.
+    SUPC->BOD33.bit.ENABLE = 0;
+    SUPC->BOD33.bit.LEVEL = 200;  // 2.7V: 1.5V + LEVEL * 6mV.
+    // Don't reset right now.
+    SUPC->BOD33.bit.ACTION = SUPC_BOD33_ACTION_NONE_Val;
+    SUPC->BOD33.bit.ENABLE = 1; // enable brown-out detection
+
+    // Wait for BOD33 peripheral to be ready.
+    while (!SUPC->STATUS.bit.BOD33RDY) {}
+
+    // Wait for voltage to rise above BOD33 value.
+    while (SUPC->STATUS.bit.BOD33DET) {}
+
+    
+    // If we are starting from a power-on or a brownout,
+    // wait for the voltage to stabilize. Don't do this on an
+    // external reset because it interferes with the timing of double-click.
+    // "BODVDD" means BOD33.
+    if (RSTC->RCAUSE.bit.POR || RSTC->RCAUSE.bit.BODVDD) {
+        do {
+            // Check again in 100ms.
+            delay(100);
+        } while (SUPC->STATUS.bit.BOD33DET);
+    }
+
+    // Now enable reset if voltage falls below minimum.
+    SUPC->BOD33.bit.ENABLE = 0;
+    // Wait for BOD33 to synchronize disable cmd
+    while (!SUPC->STATUS.bit.B33SRDY) {}
+    SUPC->BOD33.bit.ACTION = SUPC_BOD33_ACTION_RESET_Val;
+    SUPC->BOD33.bit.ENABLE = 1;
+
     led_init();
+
+    check_and_restore_fuses();
 
     logmsg("Start");
     assert((uint32_t)&_etext < APP_START_ADDRESS);
@@ -278,5 +319,37 @@ int main(void) {
                 asm("nop");
             }
         }
+    }
+}
+
+void check_and_restore_fuses(void) {
+    // If fuses have been reset to all ones, the bootloader protection is
+    // cleared, so the next attempt to program the board will erase the 
+    // bootloader and application. To prevent this, fix the fuses.
+    // If the fuses are corrupt, it is likely that the rest of user 
+    // NVM is also corrupt, so it is ok to erase it. User app should detect
+    // corrupt user space and handle it.
+    if (((uint32_t *)NVMCTRL_USER)[0] == 0xffffffff) {
+        // Turn off cache and put in manual mode.
+        NVMCTRL->CTRLA.bit.CACHEDIS0 = 1;
+        NVMCTRL->CTRLA.bit.CACHEDIS1 = 1;
+        NVMCTRL->CTRLA.bit.WMODE = NVMCTRL_CTRLA_WMODE_MAN;
+        // Set address to write.
+        NVMCTRL->ADDR.reg = NVMCTRL_USER;
+        // Erase user space
+        // This will destroy calibration and MAC address info. 
+        // But the data is likely already lost at this point
+        NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_EP;
+	while (!(NVMCTRL->STATUS.bit.READY)) {}
+        // Clear page buffer.
+        NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_PBC;
+	while (!(NVMCTRL->STATUS.bit.READY)) {}
+        // Reasonable fuse values
+        ((uint32_t *)NVMCTRL_USER)[0] = 0xF69A9239;
+        ((uint32_t *)NVMCTRL_USER)[1] = 0xAEECFF80;
+        // Write the fuses
+	NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_WQW;
+	while (!(NVMCTRL->STATUS.bit.READY)) {}
+        resetIntoBootloader();
     }
 }
