@@ -41,7 +41,8 @@ void smartEepromInitialize(void);
 
 
 void setBootProt(int v) {
-    uint32_t fuses[2];
+    uint32_t buf[FLASH_USER_PAGE_SIZE / sizeof(uint32_t)];
+    memcpy(buf, (void *) NVMCTRL_USER, FLASH_USER_PAGE_SIZE);
 
     #ifdef SAMD21
     while (!(NVMCTRL->INTFLAG.reg & NVMCTRL_INTFLAG_READY)) {}
@@ -50,20 +51,18 @@ void setBootProt(int v) {
     while (NVMCTRL->STATUS.bit.READY == 0) {}
     #endif
 
-    fuses[0] = *((uint32_t *)NVM_FUSE_ADDR);
-    fuses[1] = *(((uint32_t *)NVM_FUSE_ADDR) + 1);
+    uint32_t bootprot = (buf[0] & NVMCTRL_FUSES_BOOTPROT_Msk) >> NVMCTRL_FUSES_BOOTPROT_Pos;
 
-    uint32_t bootprot = (fuses[0] & NVMCTRL_FUSES_BOOTPROT_Msk) >> NVMCTRL_FUSES_BOOTPROT_Pos;
-
-    logval("fuse0", fuses[0]);
-    logval("fuse1", fuses[1]);
+    logval("fuse0", buf[0]);
+    logval("fuse1", buf[1]);
     logval("bootprot", bootprot);
     logval("needed", v);
 
     if (bootprot == v)
         return;
 
-    fuses[0] = (fuses[0] & ~NVMCTRL_FUSES_BOOTPROT_Msk) | (v << NVMCTRL_FUSES_BOOTPROT_Pos);
+    // change the in-memory copy of the user page
+    buf[0] = (buf[0] & ~NVMCTRL_FUSES_BOOTPROT_Msk) | (v << NVMCTRL_FUSES_BOOTPROT_Pos);
 
     #ifdef SAMD21
     NVMCTRL->CTRLB.reg = NVMCTRL->CTRLB.reg | NVMCTRL_CTRLB_CACHEDIS | NVMCTRL_CTRLB_MANW;
@@ -74,21 +73,36 @@ void setBootProt(int v) {
     #if defined(SAMD51) || defined(SAME53)
     NVMCTRL->CTRLA.bit.WMODE = NVMCTRL_CTRLA_WMODE_MAN;
 
-    exec_cmd(NVMCTRL_CTRLB_CMD_EP);
-    exec_cmd(NVMCTRL_CTRLB_CMD_PBC);
+    NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_PBC;
+    while (NVMCTRL->STATUS.bit.READY == 0) {}
+
+    NVMCTRL->ADDR.reg = NVMCTRL_USER;
+    NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_EP;
+    while (NVMCTRL->STATUS.bit.READY == 0) {}
     #endif
 
-    *((uint32_t *)NVM_FUSE_ADDR) = fuses[0];
-    *(((uint32_t *)NVM_FUSE_ADDR) + 1) = fuses[1];
+    // copy the in-memory copy of the user page into the page buffer for writing
+    uint32_t *dest = (uint32_t *) NVMCTRL_USER;
+    uint32_t *src = (uint32_t *) buf;
+    uint16_t wordsLeft = FLASH_USER_PAGE_SIZE / sizeof(uint32_t);
+    while (wordsLeft) {
+        for (uint8_t i = 0; i < 4; ++i) {
+            *dest = *src;
+            dest++;
+            src++;
+            wordsLeft--;
+        }
+        // bombs away
+        #ifdef SAMD21
+        exec_cmd(NVMCTRL_CTRLA_CMD_WAP);
+        #endif
+        #if defined(SAMD51) || defined(SAME53)
 
-    #ifdef SAMD21
-    exec_cmd(NVMCTRL_CTRLA_CMD_WAP);
-    #endif
-    #if defined(SAMD51) || defined(SAME53)
-    NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_WQW;
-    while (NVMCTRL->STATUS.bit.READY == 0) {}  
-    //exec_cmd(NVMCTRL_CTRLB_CMD_WQW);
-    #endif
+        NVMCTRL->ADDR.reg = (uint32_t) (dest - 4);
+        NVMCTRL->CTRLB.reg = NVMCTRL_CTRLB_CMDEX_KEY | NVMCTRL_CTRLB_CMD_WQW;
+        while (NVMCTRL->STATUS.bit.READY == 0) {}
+        #endif
+    }
 
     resetIntoApp();
 }
